@@ -69,9 +69,12 @@ class TTSResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
-    model_loaded: bool
-    model_version: Optional[str] = None
+    is_model_loaded: bool = Field(alias="model_loaded", default=True)
+    cozyvoice_version: Optional[str] = Field(alias="model_version", default=None)
     speakers_count: int = 0
+
+    class Config:
+        populate_by_name = True
 
 
 # =============================================================================
@@ -121,8 +124,8 @@ async def health_check():
 
     return HealthResponse(
         status="healthy" if model_loaded else "unhealthy",
-        model_loaded=model_loaded,
-        model_version=model_version,
+        is_model_loaded=model_loaded,
+        cosyvoice_version=model_version,
         speakers_count=speakers_count
     )
 

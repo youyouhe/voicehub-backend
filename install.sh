@@ -76,9 +76,9 @@ import sys
 sys.path.append('CosyVoice/third_party/Matcha-TTS')
 from modelscope import snapshot_download
 
-print(f"Downloading {MODEL_NAME}...")
+print("Downloading ${MODEL_NAME}...")
 snapshot_download('FunAudioLLM/${MODEL_NAME}-2512', local_dir='${MODEL_DIR}')
-print(f"✅ Model downloaded: {MODEL_DIR}")
+print("✅ Model downloaded: ${MODEL_DIR}")
 EOF
 else
     echo "⏭️  Skipping model download (will auto-download on first run)"

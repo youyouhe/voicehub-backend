@@ -1,6 +1,7 @@
 #!/bin/bash
 # VoiceHub Backend Installation Script
 # Sets up conda environment and installs all dependencies
+# This script is idempotent - safe to run multiple times
 
 set -e  # Exit on error
 
@@ -26,7 +27,7 @@ fi
 echo ""
 echo "[1/5] Creating conda environment..."
 if conda env list | grep -q "^${CONDA_ENV_NAME} "; then
-    echo "⚠️  Environment ${CONDA_ENV_NAME} already exists"
+    echo "⚠️  Environment ${CONDA_ENV_NAME} already exists, skipping..."
 else
     conda create -n ${CONDA_ENV_NAME} -y python=${PYTHON_VERSION}
     echo "✅ Conda environment created"
@@ -41,19 +42,30 @@ conda activate ${CONDA_ENV_NAME}
 # 3. Install Python dependencies
 echo ""
 echo "[3/5] Installing Python dependencies..."
+echo "ℹ️  Checking for missing packages..."
 pip install -r requirements.txt -i ${MIRROR_URL} --trusted-host=mirrors.aliyun.com
 
 # Fix ruamel.yaml compatibility
 echo ""
 echo "[4/5] Fixing dependency compatibility..."
 pip install "ruamel.yaml<0.18" -i ${MIRROR_URL} --trusted-host=mirrors.aliyun.com -q
-echo "✅ Dependencies fixed"
+echo "✅ Dependencies verified"
 
 # 5. Setup CosyVoice as submodule
 echo ""
 echo "[5/5] Setting up CosyVoice..."
 if [ -d "CosyVoice" ]; then
-    echo "⚠️  CosyVoice directory already exists"
+    echo "⚠️  CosyVoice directory already exists, skipping..."
+    # Check if submodules are initialized
+    if [ ! -f "CosyVoice/third_party/Matcha-TTS/README.md" ]; then
+        echo "⚠️  Submodules not initialized, initializing now..."
+        cd CosyVoice
+        git submodule update --init --recursive
+        cd ..
+        echo "✅ CosyVoice submodules initialized"
+    else
+        echo "✅ CosyVoice already set up"
+    fi
 else
     echo "Adding CosyVoice as git submodule..."
     git submodule add https://github.com/FunAudioLLM/CosyVoice.git CosyVoice
@@ -65,23 +77,34 @@ fi
 
 # Optional: Download model
 echo ""
-read -p "Download CosyVoice model now? (Model size: ~1GB) [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Downloading ${MODEL_NAME} model..."
-    mkdir -p pretrained_models
+# Check if model already exists
+if [ -d "${MODEL_DIR}" ] && [ -f "${MODEL_DIR}/llm.pt" ]; then
+    echo "✅ Model already downloaded at: ${MODEL_DIR}"
+    MODEL_EXISTS=true
+else
+    MODEL_EXISTS=false
+    read -p "Download CosyVoice model now? (Model size: ~1GB) [y/N] " -n 1 -r
+    echo
+fi
 
-    python3 << EOF
+if [ "$MODEL_EXISTS" = false ]; then
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Downloading ${MODEL_NAME} model..."
+        mkdir -p pretrained_models
+
+        python3 << EOF
 import sys
 sys.path.append('CosyVoice/third_party/Matcha-TTS')
 from modelscope import snapshot_download
 
 print("Downloading ${MODEL_NAME}...")
 snapshot_download('FunAudioLLM/${MODEL_NAME}-2512', local_dir='${MODEL_DIR}')
-print("✅ Model downloaded: ${MODEL_DIR}")
+print("Model downloaded: ${MODEL_DIR}")
 EOF
-else
-    echo "⏭️  Skipping model download (will auto-download on first run)"
+        echo "✅ Model download complete"
+    else
+        echo "⏭️  Skipping model download (will auto-download on first run)"
+    fi
 fi
 
 # Installation complete
@@ -101,4 +124,7 @@ echo ""
 echo "  3. Access API documentation:"
 echo "     http://localhost:9880/docs"
 echo ""
+echo "=================================================="
+echo ""
+echo "💡 You can safely run this script again - it will skip completed steps."
 echo "=================================================="

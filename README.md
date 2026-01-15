@@ -13,7 +13,43 @@ Minimal TTS backend for [VoiceHub](https://github.com/youyouhe/VoiceHub) fronten
 
 ## Quick Start
 
-### 1. Clone CosyVoice (as submodule)
+### Option A: Automated Installation (Recommended)
+
+Run the installation script - it handles everything:
+
+```bash
+# Clone the repository
+git clone https://github.com/youyouhe/voicehub-backend.git
+cd voicehub-backend
+
+# Run installation script
+bash install.sh
+```
+
+The script will:
+- ✅ Create a conda environment named `voicehub`
+- ✅ Install all Python dependencies
+- ✅ Add CosyVoice as a git submodule
+- ✅ Optionally download the CosyVoice model (~1GB)
+- ✅ Fix dependency compatibility issues
+
+Then activate the environment and start the server:
+
+```bash
+conda activate voicehub
+python server.py --port 9880
+```
+
+### Option B: Manual Installation
+
+#### 1. Create conda environment
+
+```bash
+conda create -n voicehub python=3.10 -y
+conda activate voicehub
+```
+
+#### 2. Clone CosyVoice (as submodule)
 
 ```bash
 git submodule add https://github.com/FunAudioLLM/CosyVoice.git CosyVoice
@@ -21,20 +57,14 @@ cd CosyVoice
 git submodule update --init --recursive
 ```
 
-### 2. Install Dependencies
+#### 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
+pip install "ruamel.yaml<0.18"  # Fix compatibility
 ```
 
-### 3. Download Model (auto-downloads on first run)
-
-```bash
-# Or manually download from ModelScope
-python -c "from modelscope import snapshot_download; snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B')"
-```
-
-### 4. Run Server
+#### 4. Run Server
 
 ```bash
 python server.py --port 9880

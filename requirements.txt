@@ -44,4 +44,5 @@ tensorboard==2.14.0
 transformers==4.51.3
 tqdm==4.66.1
 wetext==0.0.4
+wget==3.2
 x-transformers==2.11.24

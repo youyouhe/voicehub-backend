@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  voicehub-backend:
+    build: .
+    container_name: voicehub-backend
+    ports:
+      - "9880:9880"
+    volumes:
+      # Mount CosyVoice models directory to persist models
+      - ./CosyVoice/pretrained_models:/app/CosyVoice/pretrained_models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    restart: unless-stopped

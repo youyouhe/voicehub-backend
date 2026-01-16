@@ -98,6 +98,20 @@ class SpeakersResponse(BaseModel):
     mode: str
 
 
+class CreateSpeakerRequest(BaseModel):
+    """Create custom speaker request."""
+    speaker_id: str = Field(..., description="Unique ID for the speaker")
+    prompt_text: str = Field(..., description="Text spoken in reference audio")
+    prompt_audio: str = Field(..., description="Base64-encoded reference audio")
+
+
+class CreateSpeakerResponse(BaseModel):
+    """Create speaker response."""
+    success: bool
+    speaker_id: str
+    message: str
+
+
 # =============================================================================
 # FastAPI Application
 # =============================================================================
@@ -128,19 +142,18 @@ def get_model():
     return cosyvoice_model
 
 
-def decode_base64_audio(audio_base64: str, target_sr: int = 16000) -> torch.Tensor:
-    """Decode base64-encoded audio to tensor."""
+import tempfile
+
+
+def decode_base64_audio(audio_base64: str) -> str:
+    """Decode base64-encoded audio to temporary file path."""
     try:
         audio_bytes = base64.b64decode(audio_base64)
-        with io.BytesIO(audio_bytes) as audio_buffer:
-            speech, sample_rate = torchaudio.load(audio_buffer, backend='soundfile')
-        speech = speech.mean(dim=0, keepdim=True)
-        if sample_rate != target_sr:
-            if sample_rate < 16000:
-                raise ValueError(f"Audio sample rate {sample_rate} is too low (minimum 16kHz)")
-            resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)
-            speech = resampler(speech)
-        return speech
+        # Create temporary wav file
+        fd, path = tempfile.mkstemp(suffix='.wav')
+        with os.fdopen(fd, 'wb') as f:
+            f.write(audio_bytes)
+        return path
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to decode audio: {str(e)}")
 
@@ -191,6 +204,101 @@ async def list_speakers():
     )
 
 
+@app.post("/speakers", response_model=CreateSpeakerResponse)
+async def create_speaker(request: CreateSpeakerRequest):
+    """
+    Create a custom speaker using zero-shot voice cloning.
+
+    The speaker can be used with instruct2 mode for emotion/style control.
+    """
+    model = get_model()
+
+    # Check if speaker_id already exists
+    existing_speakers = model.list_available_spks()
+    if request.speaker_id in existing_speakers:
+        raise HTTPException(status_code=400, detail=f"Speaker '{request.speaker_id}' already exists")
+
+    # Decode audio to temporary file
+    temp_audio_path = None
+    try:
+        temp_audio_path = decode_base64_audio(request.prompt_audio)
+
+        # Add zero-shot speaker
+        success = model.add_zero_shot_spk(
+            request.prompt_text,
+            temp_audio_path,
+            request.speaker_id
+        )
+
+        if success:
+            # Remove flow prompt tokens to prevent reference audio in output
+            # This fixes the issue where prompt audio appears at the start
+            if hasattr(model.frontend, 'spk2info') and request.speaker_id in model.frontend.spk2info:
+                spk_info = model.frontend.spk2info[request.speaker_id]
+                keys_to_delete = [k for k in spk_info.keys() if 'flow_prompt_speech_token' in k]
+                for key in keys_to_delete:
+                    del spk_info[key]
+
+            # Persist speaker info to disk
+            model.save_spkinfo()
+            logger.info(f"Created custom speaker: {request.speaker_id}")
+            return CreateSpeakerResponse(
+                success=True,
+                speaker_id=request.speaker_id,
+                message=f"Speaker '{request.speaker_id}' created successfully"
+            )
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create speaker")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create speaker: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create speaker: {str(e)}")
+    finally:
+        # Clean up temp file
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except:
+                pass
+
+
+@app.delete("/speakers/{speaker_id}")
+async def delete_speaker(speaker_id: str):
+    """Delete a custom speaker by ID."""
+    model = get_model()
+
+    # Check if speaker exists
+    existing_speakers = model.list_available_spks()
+    if speaker_id not in existing_speakers:
+        raise HTTPException(status_code=404, detail=f"Speaker '{speaker_id}' not found")
+
+    try:
+        # Remove speaker from model's speaker info
+        # Check both model.spk2info and model.frontend.spk2info
+        spk2info = None
+        if hasattr(model, 'spk2info') and speaker_id in model.spk2info:
+            spk2info = model.spk2info
+        elif hasattr(model.frontend, 'spk2info') and speaker_id in model.frontend.spk2info:
+            spk2info = model.frontend.spk2info
+
+        if spk2info:
+            del spk2info[speaker_id]
+            # Persist changes to disk
+            model.save_spkinfo()
+            logger.info(f"Deleted speaker: {speaker_id}")
+            return {"success": True, "message": f"Speaker '{speaker_id}' deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Cannot delete built-in speakers")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete speaker: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete speaker: {str(e)}")
+
+
 @app.post("/tts", response_model=TTSResponse)
 async def text_to_speech(request: TTSRequest):
     """
@@ -211,6 +319,9 @@ async def text_to_speech(request: TTSRequest):
 
     start_time = time.time()
 
+    # Track temporary files for cleanup
+    temp_files = []
+
     try:
         if mode == "sft":
             # SFT mode: use pretrained speaker
@@ -228,15 +339,14 @@ async def text_to_speech(request: TTSRequest):
 
         elif mode == "zero_shot":
             # Zero-shot mode: clone voice from reference audio
-            if not request.prompt_text:
-                raise HTTPException(status_code=400, detail="prompt_text required for zero_shot mode")
             if not request.prompt_audio:
                 raise HTTPException(status_code=400, detail="prompt_audio required for zero_shot mode")
 
             prompt_speech = decode_base64_audio(request.prompt_audio)
+            temp_files.append(prompt_speech)
             model_output = model.inference_zero_shot(
                 tts_text=request.text,
-                prompt_text=request.prompt_text,
+                prompt_text=request.prompt_text or "",
                 prompt_wav=prompt_speech,
                 stream=False,
                 speed=request.speed
@@ -248,6 +358,7 @@ async def text_to_speech(request: TTSRequest):
                 raise HTTPException(status_code=400, detail="prompt_audio required for cross_lingual mode")
 
             prompt_speech = decode_base64_audio(request.prompt_audio)
+            temp_files.append(prompt_speech)
             model_output = model.inference_cross_lingual(
                 tts_text=request.text,
                 prompt_wav=prompt_speech,
@@ -262,10 +373,16 @@ async def text_to_speech(request: TTSRequest):
             if not request.speaker_id:
                 raise HTTPException(status_code=400, detail="speaker_id required for instruct2 mode")
 
+            # Use zero_shot_spk_id parameter for saved speakers
+            # prompt_wav is required but not used when zero_shot_spk_id is provided
+            # Use a default reference audio as placeholder
+            default_prompt_wav = "CosyVoice/asset/zero_shot_prompt.wav"
+
             model_output = model.inference_instruct2(
                 tts_text=request.text,
                 instruct_text=request.instruct_text,
-                prompt_wav=None,
+                prompt_wav=default_prompt_wav,
+                zero_shot_spk_id=request.speaker_id,
                 stream=False,
                 speed=request.speed
             )
@@ -279,10 +396,22 @@ async def text_to_speech(request: TTSRequest):
             audio = output['tts_speech']
             audio_chunks.append(audio.numpy().flatten())
 
-        # Combine and convert to bytes
+        # Combine and convert to int16
         combined_audio = np.concatenate(audio_chunks)
         audio_int16 = (combined_audio * (2 ** 15)).astype(np.int16)
-        audio_bytes = audio_int16.tobytes()
+        audio_tensor = torch.from_numpy(audio_int16).unsqueeze(0)  # Add channel dimension
+
+        # Write to temporary WAV file
+        fd, temp_wav_path = tempfile.mkstemp(suffix='.wav')
+        os.close(fd)
+        torchaudio.save(temp_wav_path, audio_tensor, model.sample_rate, backend='soundfile')
+
+        # Read back as bytes for proper WAV format
+        with open(temp_wav_path, 'rb') as f:
+            audio_bytes = f.read()
+
+        # Clean up temp file
+        os.remove(temp_wav_path)
 
         # Calculate duration
         duration = len(audio_int16) / model.sample_rate
@@ -306,6 +435,14 @@ async def text_to_speech(request: TTSRequest):
     except Exception as e:
         logger.error(f"TTS generation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+    finally:
+        # Clean up temporary files
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as e:
+                logger.warning(f"Failed to remove temp file {temp_file}: {e}")
 
 
 # =============================================================================

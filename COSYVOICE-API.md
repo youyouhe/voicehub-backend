@@ -1,6 +1,6 @@
 # VoiceHub Backend API 文档
 
-基于 CosyVoice3 的语音合成 API，支持多种推理模式。
+基于 CosyVoice3 的语音合成 API，支持多种推理模式和系统监控。
 
 ## 基础信息
 
@@ -27,14 +27,103 @@ GET /health
   "status": "healthy",
   "model_loaded": true,
   "model_version": "3",
-  "speakers_count": 0,
-  "available_modes": ["zero_shot", "cross_lingual", "instruct2"]
+  "model_name": "Fun-CosyVoice3-0.5B",
+  "speakers_count": 5,
+  "available_modes": ["zero_shot", "cross_lingual", "instruct2"],
+  "uptime_seconds": 3600,
+  "server_time": "2026-01-16T10:30:00Z"
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| status | string | 服务状态: healthy, unhealthy, loading |
+| model_loaded | boolean | 模型是否已加载 |
+| model_version | string | CosyVoice 版本号 |
+| model_name | string | 模型名称 |
+| speakers_count | int | 可用说话人数量 |
+| available_modes | array | 支持的推理模式 |
+| uptime_seconds | int | 服务运行时长（秒） |
+| server_time | string | 服务器时间（ISO 8601） |
+
+---
+
+### 2. 系统资源监控
+
+获取系统资源使用情况，包括 CPU、内存、GPU、磁盘、网络。
+
+**请求**
+```http
+GET /system/metrics
+```
+
+**响应**
+```json
+{
+  "cpu": {
+    "usage_percent": 25.5,
+    "cores": 8
+  },
+  "memory": {
+    "total_gb": 32.0,
+    "used_gb": 12.5,
+    "available_gb": 19.5,
+    "usage_percent": 39.1
+  },
+  "gpu": {
+    "available": true,
+    "name": "NVIDIA GeForce RTX 3060",
+    "driver_version": "536.99",
+    "cuda_version": "12.2",
+    "vram_total_mb": 12288,
+    "vram_used_mb": 4300,
+    "vram_free_mb": 7988,
+    "gpu_utilization_percent": 45.2,
+    "temperature_celsius": 52,
+    "power_draw_watts": 145.5
+  },
+  "disk": {
+    "total_gb": 512.0,
+    "used_gb": 120.0,
+    "available_gb": 392.0,
+    "usage_percent": 23.4
+  },
+  "network": {
+    "bytes_sent": 1024000,
+    "bytes_recv": 2048000,
+    "packets_sent": 5000,
+    "packets_recv": 8000
+  },
+  "timestamp": "2026-01-16T10:30:00Z"
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| gpu.available | boolean | GPU 是否可用 |
+| gpu.name | string | GPU 型号 |
+| gpu.vram_total_mb | int | 显存总量 (MB) |
+| gpu.vram_used_mb | int | 已用显存 (MB) |
+| gpu.temperature_celsius | int | GPU 温度 (°C) |
+| gpu.gpu_utilization_percent | float | GPU 利用率 (%) |
+
+**错误响应**（GPU 不可用时）
+```json
+{
+  "gpu": {
+    "available": false,
+    "error": "nvidia-smi not found"
+  }
 }
 ```
 
 ---
 
-### 2. 列出说话人
+### 3. 列出说话人
 
 获取所有可用的说话人 ID 列表。
 
@@ -54,7 +143,7 @@ GET /speakers
 
 ---
 
-### 3. 创建自定义说话人
+### 4. 创建自定义说话人
 
 使用参考音频创建自定义说话人，用于 Instruct2 模式。
 
@@ -87,26 +176,9 @@ Content-Type: application/json
 }
 ```
 
-**示例 (Python)**
-```python
-import base64
-import requests
-
-# 读取音频文件
-with open("reference.wav", "rb") as f:
-    audio_data = base64.b64encode(f.read()).decode("utf-8")
-
-# 创建说话人
-response = requests.post("http://localhost:9880/speakers", json={
-    "speaker_id": "my_voice",
-    "prompt_text": "希望你以后能够做的比我还好呦。",
-    "prompt_audio": audio_data
-})
-```
-
 ---
 
-### 4. 删除说话人
+### 5. 删除说话人
 
 删除指定的自定义说话人。
 
@@ -125,7 +197,7 @@ DELETE /speakers/{speaker_id}
 
 ---
 
-### 5. 文字转语音 (TTS)
+### 6. 文字转语音 (TTS)
 
 根据指定模式生成语音。
 
@@ -137,8 +209,7 @@ Content-Type: application/json
 {
   "mode": "zero_shot",
   "text": "要合成的文本",
-  "speed": 1.0,
-  ...
+  "speed": 1.0
 }
 ```
 
@@ -188,8 +259,6 @@ Content-Type: application/json
 }
 ```
 
-**适用场景**：克隆任何声音的音色
-
 ---
 
 ### Cross-Lingual 模式
@@ -210,8 +279,6 @@ Content-Type: application/json
   "prompt_audio": "base64..."
 }
 ```
-
-**适用场景**：中文音频 → 英文输出（或任何语言组合）
 
 ---
 
@@ -236,118 +303,60 @@ Content-Type: application/json
 }
 ```
 
-**支持的指令**
-
-| 指令类型 | 示例 |
-|---------|------|
-| 方言 | 用四川话说这句话 |
-| 语速 | 请用尽可能快地语速说这句话 |
-| 情感 | 用悲伤/欢快的语气说这句话 |
-
 ---
 
-## 完整使用示例
+## 前端集成示例
 
-### Python
+### JavaScript/TypeScript
 
-```python
-import base64
-import requests
+```typescript
+interface HealthResponse {
+  status: string;
+  model_loaded: boolean;
+  model_version: string;
+  model_name: string;
+  speakers_count: number;
+  available_modes: string[];
+  uptime_seconds: number;
+  server_time: string;
+}
 
-BASE_URL = "http://localhost:9880"
+interface SystemMetrics {
+  cpu: { usage_percent: number; cores: number };
+  memory: { total_gb: number; used_gb: number; available_gb: number };
+  gpu: {
+    available: boolean;
+    name?: string;
+    vram_total_mb?: number;
+    vram_used_mb?: number;
+    temperature_celsius?: number;
+    gpu_utilization_percent?: number;
+  };
+}
 
-def read_audio(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+// 健康检查
+async function checkHealth(): Promise<HealthResponse> {
+  const response = await fetch('http://localhost:9880/health');
+  return await response.json();
+}
 
-# 1. 创建说话人
-speaker = requests.post(f"{BASE_URL}/speakers", json={
-    "speaker_id": "my_voice",
-    "prompt_text": "希望你以后能够做的比我还好呦。",
-    "prompt_audio": read_audio("reference.wav")
-}).json()
-
-# 2. Zero-Shot 模式
-result = requests.post(f"{BASE_URL}/tts", json={
-    "mode": "zero_shot",
-    "text": "你好，这是测试。",
-    "prompt_text": "希望你以后能够做的比我还好呦。",
-    "prompt_audio": read_audio("reference.wav")
-}).json()
-
-# 3. 保存音频
-with open("output.wav", "wb") as f:
-    f.write(base64.b64decode(result["audio_data"]))
-```
-
-### cURL
-
-```bash
-# 健康检查
-curl http://localhost:9880/health
-
-# 列出说话人
-curl http://localhost:9880/speakers
-
-# Zero-Shot 模式
-curl -X POST http://localhost:9880/tts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "mode": "zero_shot",
-    "text": "你好，这是测试。",
-    "prompt_text": "希望你以后能够做的比我还好呦。",
-    "prompt_audio": "<base64_audio>"
-  }'
-```
-
-### JavaScript
-
-```javascript
-const BASE_URL = "http://localhost:9880";
-
-// Zero-Shot 模式
-async function textToSpeech(text, promptText, audioBase64) {
-  const response = await fetch(`${BASE_URL}/tts`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      mode: 'zero_shot',
-      text: text,
-      prompt_text: promptText,
-      prompt_audio: audioBase64
-    })
-  });
+// 系统监控（建议轮询间隔 2-5 秒）
+async function getSystemMetrics(): Promise<SystemMetrics> {
+  const response = await fetch('http://localhost:9880/system/metrics');
   return await response.json();
 }
 
 // 使用示例
-const result = await textToSpeech(
-  "你好，这是测试。",
-  "希望你以后能够做的比我还好呦。",
-  audioBase64
-);
+const health = await checkHealth();
+console.log(`Model: ${health.model_name}, Uptime: ${health.uptime_seconds}s`);
 
-// 保存音频
-const audio = atob(result.audio_data);
-// ... 处理音频数据
-```
-
----
-
-## 错误响应
-
-错误格式：
-```json
-{
-  "detail": "错误信息"
+const metrics = await getSystemMetrics();
+if (metrics.gpu.available) {
+  console.log(`GPU: ${metrics.gpu.name}`);
+  console.log(`VRAM: ${metrics.gpu.vram_used_mb} / ${metrics.gpu.vram_total_mb} MB`);
+  console.log(`Temp: ${metrics.gpu.temperature_celsius}°C`);
 }
 ```
-
-常见错误：
-- `prompt_text required for zero_shot mode` - 缺少必需参数
-- `speaker_id required for instruct2 mode` - 缺少说话人 ID
-- `Speaker 'xxx' not found` - 说话人不存在
-- `TTS generation failed: ...` - 生成失败
 
 ---
 
@@ -358,3 +367,4 @@ const audio = atob(result.audio_data);
 3. **文本长度**：建议单次不超过 500 字
 4. **Speaker 持久化**：创建的 speaker 保存在 `spk2info.pt`，服务器重启后仍然存在
 5. **API 文档**：访问 `http://localhost:9880/docs` 查看交互式 API 文档
+6. **GPU 监控**：需要 nvidia-smi 命令，无 GPU 时 `gpu.available` 为 false

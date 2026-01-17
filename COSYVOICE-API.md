@@ -44,7 +44,7 @@ GET /health
 | model_version | string | CosyVoice 版本号 |
 | model_name | string | 模型名称 |
 | speakers_count | int | 可用说话人数量 |
-| available_modes | array | 支持的推理模式 |
+| available_modes | array | 支持的推理模式: sft, zero_shot, cross_lingual, instruct2 |
 | uptime_seconds | int | 服务运行时长（秒） |
 | server_time | string | 服务器时间（ISO 8601） |
 
@@ -143,7 +143,35 @@ GET /speakers
 
 ---
 
-### 4. 创建自定义说话人
+### 4. 获取说话人详情
+
+获取指定说话人的详细信息，包括 prompt_text。
+
+**请求**
+```http
+GET /speakers/{speaker_id}
+```
+
+**响应**
+```json
+{
+  "speaker_id": "my_voice",
+  "prompt_text": "参考音频对应的文本内容",
+  "is_builtin": false
+}
+```
+
+**字段说明**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| speaker_id | string | 说话人 ID |
+| prompt_text | string | 参考音频对应的文本（可能为 null） |
+| is_builtin | boolean | 是否为内置说话人 |
+
+---
+
+### 5. 创建自定义说话人
 
 使用参考音频创建自定义说话人，用于 Instruct2 模式。
 
@@ -178,7 +206,7 @@ Content-Type: application/json
 
 ---
 
-### 5. 删除说话人
+### 6. 删除说话人
 
 删除指定的自定义说话人。
 
@@ -197,7 +225,7 @@ DELETE /speakers/{speaker_id}
 
 ---
 
-### 6. 文字转语音 (TTS)
+### 7. 文字转语音 (TTS)
 
 根据指定模式生成语音。
 
@@ -217,7 +245,7 @@ Content-Type: application/json
 
 | 参数 | 类型 | 必需 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| mode | string | ✅ | - | 推理模式: zero_shot, cross_lingual, instruct2 |
+| mode | string | ✅ | - | 推理模式: sft, zero_shot, cross_lingual, instruct2 |
 | text | string | ✅ | - | 要合成的文本 (1-5000字符) |
 | speed | float | ❌ | 1.0 | 语速 (0.5-2.0) |
 | seed | int | ❌ | - | 随机种子，用于复现结果 |
@@ -237,24 +265,64 @@ Content-Type: application/json
 
 ## 推理模式详解
 
-### Zero-Shot 模式
+### SFT 模式
 
-声音克隆模式，使用参考音频克隆音色。
+预训练说话人模式，使用模型内置的说话人。
 
 **额外参数**
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| speaker_id | string | ✅ | 内置说话人 ID |
+
+**请求示例**
+```json
+{
+  "mode": "sft",
+  "text": "你好，这是一个测试。",
+  "speaker_id": "中文女",
+  "speed": 1.0
+}
+```
+
+**注意**：仅当模型有预训练说话人时可用。
+
+---
+
+### Zero-Shot 模式
+
+声音克隆模式，使用参考音频克隆音色。支持两种方式：
+
+**方式一：传统模式（上传参考音频）**
 
 | 参数 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | prompt_text | string | ✅ | 参考音频对应的文本 |
 | prompt_audio | string | ✅ | Base64 编码的参考音频 |
 
-**请求示例**
+**方式二：使用已保存的说话人**
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| speaker_id | string | ✅ | 已创建的说话人 ID（无需重复上传音频） |
+
+**请求示例（方式一）**
 ```json
 {
   "mode": "zero_shot",
   "text": "你好，这是一个测试。",
   "prompt_text": "希望你以后能够做的比我还好呦。",
   "prompt_audio": "base64...",
+  "speed": 1.0
+}
+```
+
+**请求示例（方式二）**
+```json
+{
+  "mode": "zero_shot",
+  "text": "你好，这是一个测试。",
+  "speaker_id": "my_voice",
   "speed": 1.0
 }
 ```

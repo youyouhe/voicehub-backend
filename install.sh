@@ -12,7 +12,7 @@ echo "=================================================="
 # Configuration
 CONDA_ENV_NAME="voicehub"
 PYTHON_VERSION="3.10"
-MODEL_NAME="Fun-CosyVoice3-0.5B"
+MODEL_NAME="CosyVoice2-0.5B"
 MODEL_DIR="CosyVoice/pretrained_models/${MODEL_NAME}"
 MIRROR_URL="https://mirrors.aliyun.com/pypi/simple/"
 
@@ -98,7 +98,7 @@ sys.path.append('CosyVoice/third_party/Matcha-TTS')
 from modelscope import snapshot_download
 
 print("Downloading ${MODEL_NAME}...")
-snapshot_download('FunAudioLLM/${MODEL_NAME}-2512', local_dir='${MODEL_DIR}')
+snapshot_download('iic/${MODEL_NAME}', local_dir='${MODEL_DIR}')
 print("Model downloaded: ${MODEL_DIR}")
 EOF
         echo "✅ Model download complete"

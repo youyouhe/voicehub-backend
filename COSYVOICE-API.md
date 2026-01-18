@@ -1,6 +1,6 @@
 # VoiceHub Backend API 文档
 
-基于 CosyVoice3 的语音合成 API，支持多种推理模式和系统监控。
+基于 CosyVoice2 的语音合成 API，支持多种推理模式和系统监控。
 
 ## 基础信息
 
@@ -26,8 +26,8 @@ GET /health
 {
   "status": "healthy",
   "model_loaded": true,
-  "model_version": "3",
-  "model_name": "Fun-CosyVoice3-0.5B",
+  "model_version": "2",
+  "model_name": "CosyVoice2-0.5B",
   "speakers_count": 5,
   "available_modes": ["zero_shot", "cross_lingual", "instruct2"],
   "uptime_seconds": 3600,

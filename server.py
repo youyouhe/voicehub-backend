@@ -181,7 +181,7 @@ class SystemMetricsResponse(BaseModel):
 # =============================================================================
 app = FastAPI(
     title="VoiceHub Backend",
-    description="Enhanced TTS API for VoiceHub frontend using CosyVoice3",
+    description="Enhanced TTS API for VoiceHub frontend using CosyVoice2",
     version="2.0.0"
 )
 

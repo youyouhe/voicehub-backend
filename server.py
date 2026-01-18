@@ -23,10 +23,12 @@ from typing import Optional
 import numpy as np
 import torch
 import torchaudio
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 import uvicorn
 
 # Add CosyVoice to path
@@ -191,6 +193,141 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# =============================================================================
+# Error Logging Middleware
+# =============================================================================
+class ErrorLoggingMiddleware(BaseHTTPMiddleware):
+    """Middleware to log full request details for error responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            response = await call_next(request)
+
+            # Log error responses (4xx and 5xx)
+            if response.status_code >= 400:
+                await self._log_error_request(request, response.status_code, response.headers)
+
+            return response
+
+        except Exception as exc:
+            # Log unhandled exceptions
+            await self._log_error_request(request, 500, None, exc)
+            raise
+
+    async def _log_error_request(self, request: Request, status_code: int, headers, exc=None):
+        """Log full request details for errors."""
+        logger.error("=" * 70)
+        logger.error(f"ERROR REQUEST: {request.method} {request.url.path}")
+        logger.error(f"Status Code: {status_code}")
+        logger.error("-" * 70)
+
+        # Request details
+        logger.error(f"Client: {request.client.host if request.client else 'unknown'}:{request.client.port if request.client else 'unknown'}")
+        logger.error(f"Full URL: {str(request.url)}")
+        logger.error(f"HTTP Version: {request.scope.get('http_version', 'unknown')}")
+        logger.error(f"Scheme: {request.url.scheme}")
+        logger.error(f"Server: {request.url.hostname}:{request.url.port if request.url.port else 'default'}")
+
+        # Headers
+        logger.error("-" * 70)
+        logger.error("Headers:")
+        for name, value in request.headers.items():
+            logger.error(f"  {name}: {value}")
+
+        # Query parameters
+        if request.query_params:
+            logger.error("-" * 70)
+            logger.error("Query Parameters:")
+            for key, value in request.query_params.items():
+                logger.error(f"  {key}: {value}")
+
+        # Body (for POST/PUT/PATCH)
+        if request.method in ("POST", "PUT", "PATCH"):
+            try:
+                body = await request.body()
+                if body:
+                    logger.error("-" * 70)
+                    logger.error(f"Body ({len(body)} bytes):")
+                    content_type = request.headers.get("content-type", "")
+
+                    # Try to format as JSON for readability
+                    if "application/json" in content_type:
+                        try:
+                            import json
+                            body_json = json.loads(body.decode())
+                            logger.error(f"  {json.dumps(body_json, indent=2, ensure_ascii=False)}")
+                        except:
+                            logger.error(f"  {body.decode('utf-8', errors='replace')}")
+                    else:
+                        # Show preview for non-JSON (limit to 500 chars)
+                        body_str = body.decode('utf-8', errors='replace')
+                        if len(body_str) > 500:
+                            logger.error(f"  {body_str[:500]}... (truncated)")
+                        else:
+                            logger.error(f"  {body_str}")
+            except Exception as e:
+                logger.error(f"  (Failed to read body: {e})")
+
+        # Exception info
+        if exc:
+            logger.error("-" * 70)
+            logger.error(f"Exception: {type(exc).__name__}: {exc}")
+            import traceback
+            logger.error("Traceback:")
+            for line in traceback.format_tb(exc.__traceback__):
+                logger.error(line.rstrip())
+
+        logger.error("=" * 70)
+
+
+app.add_middleware(ErrorLoggingMiddleware)
+
+
+# =============================================================================
+# Exception Handlers
+# =============================================================================
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    """Handle 404 errors with detailed logging."""
+    logger.error(f"404 Not Found: {request.method} {request.url.path}")
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "detail": f"Endpoint not found: {request.method} {request.url.path}",
+            "available_endpoints": [
+                "GET /health",
+                "GET /speakers",
+                "GET /speakers/{speaker_id}",
+                "POST /speakers",
+                "DELETE /speakers/{speaker_id}",
+                "GET /system/metrics",
+                "POST /tts"
+            ]
+        }
+    )
+
+
+@app.exception_handler(500)
+async def internal_error_handler(request: Request, exc):
+    """Handle 500 errors with detailed logging."""
+    logger.error(f"500 Internal Server Error: {request.method} {request.url.path}")
+    logger.error(f"Exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error", "error": str(exc)}
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTPException with logging."""
+    logger.warning(f"HTTP {exc.status_code}: {request.method} {request.url.path} - {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
 
 # Global model instance
 cosyvoice_model = None
